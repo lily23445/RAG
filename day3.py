@@ -1,4 +1,5 @@
 import os
+import streamlit as st
 import warnings
 from dotenv import load_dotenv
 
@@ -11,40 +12,17 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 
+if "GROQ_API_KEY" in st.secrets:
+    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 load_dotenv()
-
-PDF_PATH  = "Test.pdf"
-INDEX_DIR = "faiss_index"
 
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
 llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
-
-# ---- build or load ----
-def build_or_load_vectorstore():
-    if os.path.exists(INDEX_DIR):
-        print("Loading existing FAISS index from disk...")
-        return FAISS.load_local(
-            INDEX_DIR, embeddings,
-            allow_dangerous_deserialization=True
-        )
-    print("No saved index found. Building from PDF...")
-    loader   = PyPDFLoader(PDF_PATH)
-    pages    = loader.load()
-    print(f"Loaded {len(pages)} pages")
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks   = splitter.split_documents(pages)
-    print(f"Split into {len(chunks)} chunks")
-    vs = FAISS.from_documents(chunks, embeddings)
-    vs.save_local(INDEX_DIR)
-    print(f"Index saved to '{INDEX_DIR}/'")
-    return vs
-
-vectorstore = build_or_load_vectorstore()
-retriever   = vectorstore.as_retriever(search_kwargs={"k": 4})
 
 # ---- prompts ----
 reformulate_prompt = ChatPromptTemplate.from_messages([
@@ -105,8 +83,28 @@ def build_sources(answer: str, docs: list) -> list:
             sources.append(f"Page {page}: {snippet}...")
     return sources
 
-# ---- terminal loop ----
+# ---- terminal loop (local only) ----
 if __name__ == "__main__":
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+    PDF_PATH  = "Test.pdf"
+    INDEX_DIR = "faiss_index"
+
+    def build_or_load_vectorstore():
+        if os.path.exists(INDEX_DIR):
+            return FAISS.load_local(INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
+        loader   = PyPDFLoader(PDF_PATH)
+        pages    = loader.load()
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks   = splitter.split_documents(pages)
+        vs = FAISS.from_documents(chunks, embeddings)
+        vs.save_local(INDEX_DIR)
+        return vs
+
+    vectorstore = build_or_load_vectorstore()
+    retriever   = vectorstore.as_retriever(search_kwargs={"k": 4})
+
     print("\nReady. Ask questions (type 'quit' to exit, 'clear' to reset memory).\n")
     chat_history = []
 
