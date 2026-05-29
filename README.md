@@ -1,6 +1,7 @@
 ﻿# RAG
 # Chat with PDF — RAG from Scratch
 
+🔗 Live Demo(so far--day 3): [https://askmeque.streamlit.app/]
 A document Q&A app built with Retrieval-Augmented Generation (RAG). Upload a PDF, ask questions in natural language, and get answers grounded in the document — with source page references.
 
 Built as a focused 7-day learning sprint to go from zero to a live, deployed project.
@@ -36,8 +37,8 @@ No paid API keys required — the whole pipeline runs on free tiers.
 
 - **Day 1 — Foundation** ✅ Core RAG pipeline working in the terminal. Load → split → embed → store → retrieve → answer.
 - **Day 2 — Make it real** 🔨 Persist the vector index, return source citations, harden the prompt against hallucination, interactive loop.
-- **Day 3 — Polish** Conversation memory for follow-up questions; smarter handling of multiple documents.
-- **Day 4 — UI** Wrap it in a Streamlit web interface with file upload and a chat box.
+- **Day 3 — Polish** Conversation memory for follow-up questions; UI** Wrap it in a Streamlit web interface with file upload and a chat box.
+- **Day 4 — handle multiple files.
 - **Day 5 — Quality** Tune retrieval, improve prompts, add evaluation.
 - **Day 6 — Deploy** Push it live with a public URL.
 - **Day 7 — Ship** Polish the README, record a demo, write it up.
@@ -178,6 +179,28 @@ A note on a real issue solved along the way: the retriever always returns its to
 
 ---
 
+## Day 3 — Polish ✅
+
+The project evolved from a terminal prototype into a full conversational document assistant.
+
+What was added
+
+Conversation memory — follow-up questions now work naturally. Instead of treating every question independently, the app keeps track of chat history so users can ask contextual questions like:
+
+“Summarize chapter 2.”
+“Now explain that in simpler words.”
+“What was the author’s conclusion again?”
+
+This was implemented using LangChain memory integrated into the LCEL pipeline.
+
+
+Streamlit UI — the terminal app was converted into a web interface with:
+
+PDF upload support
+Chat-style conversation window
+Persistent chat history
+Source citation display
+Cleaner user experience overall
 ## Setup
 
 ```bash
@@ -229,6 +252,16 @@ Set `PDF_PATH` in `main.py` to point at your PDF first. The first run builds the
 - **Distance metrics** — L2 vs cosine, and why the choice affects relevance scores
 
 ---
+## Day 3 — Polish ✅
+
+- ** Conversational RAG
+- ** Chat history & memory management
+- ** Stateful vs stateless interactions
+- ** Streamlit app architecture
+- ** Handling multiple document sources
+- ** Deploying  applications publicly
+
+
 
 ## Status
 
