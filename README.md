@@ -37,8 +37,8 @@ No paid API keys required — the whole pipeline runs on free tiers.
 
 - **Day 1 — Foundation** ✅ Core RAG pipeline working in the terminal. Load → split → embed → store → retrieve → answer.
 - **Day 2 — Make it real** 🔨 Persist the vector index, return source citations, harden the prompt against hallucination, interactive loop.
-- **Day 3 — Polish** Conversation memory for follow-up questions; smarter handling of multiple documents.
-- **Day 4 — UI** Wrap it in a Streamlit web interface with file upload and a chat box.
+- **Day 3 — Polish** Conversation memory for follow-up questions; UI** Wrap it in a Streamlit web interface with file upload and a chat box.
+- **Day 4 — handle multiple files.
 - **Day 5 — Quality** Tune retrieval, improve prompts, add evaluation.
 - **Day 6 — Deploy** Push it live with a public URL.
 - **Day 7 — Ship** Polish the README, record a demo, write it up.
