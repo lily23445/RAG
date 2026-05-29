@@ -77,10 +77,19 @@ def build_sources(answer: str, docs: list) -> list:
     seen, sources = set(), []
     for doc in docs:
         page = doc.metadata.get("page", "?")
-        if page not in seen:
-            seen.add(page)
+        file = doc.metadata.get("source_file", "Unknown")
+
+        key = (file, page)
+
+        if key not in seen:
+            seen.add(key)
+
             snippet = doc.page_content[:100].replace("\n", " ")
-            sources.append(f"Page {page}: {snippet}...")
+
+            sources.append(
+                f"{file} | Page {page}: {snippet}..."
+            )
+
     return sources
 
 # ---- terminal loop (local only) ----
@@ -88,21 +97,39 @@ if __name__ == "__main__":
     from langchain_community.document_loaders import PyPDFLoader
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-    PDF_PATH  = "Test.pdf"
+    PDF_PATHS = ["Test.pdf"]  # Add more PDF paths here
     INDEX_DIR = "faiss_index"
 
-    def build_or_load_vectorstore():
+    def build_or_load_vectorstore(pdf_paths):
         if os.path.exists(INDEX_DIR):
             return FAISS.load_local(INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
-        loader   = PyPDFLoader(PDF_PATH)
-        pages    = loader.load()
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        chunks   = splitter.split_documents(pages)
-        vs = FAISS.from_documents(chunks, embeddings)
+        
+        # Process multiple PDFs
+        all_chunks = []
+        for pdf_path in pdf_paths:
+            if not os.path.exists(pdf_path):
+                print(f"Warning: {pdf_path} not found, skipping...")
+                continue
+            
+            loader = PyPDFLoader(pdf_path)
+            pages = loader.load()
+            
+            # Add source_file metadata to each document
+            for page in pages:
+                page.metadata["source_file"] = os.path.basename(pdf_path)
+            
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+            chunks = splitter.split_documents(pages)
+            all_chunks.extend(chunks)
+        
+        if not all_chunks:
+            raise ValueError("No valid PDFs found!")
+        
+        vs = FAISS.from_documents(all_chunks, embeddings)
         vs.save_local(INDEX_DIR)
         return vs
 
-    vectorstore = build_or_load_vectorstore()
+    vectorstore = build_or_load_vectorstore(PDF_PATHS)
     retriever   = vectorstore.as_retriever(search_kwargs={"k": 4})
 
     print("\nReady. Ask questions (type 'quit' to exit, 'clear' to reset memory).\n")
