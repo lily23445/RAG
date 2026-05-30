@@ -5,66 +5,65 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from day3 import ask, build_sources, embeddings
+from day4 import ask, build_sources, embeddings
 
 st.set_page_config(page_title="Chat with PDFs", page_icon="📄", layout="centered")
 
-# ---- cache the index build so it only runs once per uploaded files ----
 @st.cache_resource(show_spinner="Building index from PDFs...")
-def get_retriever(file_bytes_list, filenames):
-    all_chunks = []
+def get_retriever(file_bytes_tuple, filenames_tuple):
+    all_chunks  = []
     total_pages = 0
-    
-    for file_bytes, filename in zip(file_bytes_list, filenames):
+
+    for file_bytes, filename in zip(file_bytes_tuple, filenames_tuple):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
             f.write(file_bytes)
             tmp_path = f.name
-        
         try:
             loader = PyPDFLoader(tmp_path)
-            pages = loader.load()
-            
-            # Add source_file metadata to each document
+            pages  = loader.load()
             for page in pages:
                 page.metadata["source_file"] = filename
-            
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            chunks = splitter.split_documents(pages)
+            chunks   = splitter.split_documents(pages)
             all_chunks.extend(chunks)
             total_pages += len(pages)
         finally:
             os.unlink(tmp_path)
-    
+
     vs = FAISS.from_documents(all_chunks, embeddings)
     return vs.as_retriever(search_kwargs={"k": 4}), total_pages, len(all_chunks)
 
 # ---- session state ----
-if "chat_history"  not in st.session_state: st.session_state.chat_history  = []
-if "messages"      not in st.session_state: st.session_state.messages      = []
-if "retriever"     not in st.session_state: st.session_state.retriever     = None
+if "chat_history"   not in st.session_state: st.session_state.chat_history   = []
+if "messages"       not in st.session_state: st.session_state.messages       = []
+if "retriever"      not in st.session_state: st.session_state.retriever      = None
 if "uploaded_files" not in st.session_state: st.session_state.uploaded_files = []
 
-# ---- sidebar ----
+# ---- UI ----
 st.title("📄 Chat with Multiple PDFs")
-st.caption("Upload PDFs and ask questions about them.")
+st.caption("Upload one or more PDFs and ask questions about them.")
 
 with st.sidebar:
     st.header("Upload your PDFs")
-    uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Choose PDFs", type="pdf", accept_multiple_files=True
+    )
 
     if uploaded_files:
-        # Check if files changed
         current_filenames = [f.name for f in uploaded_files]
+
         if current_filenames != st.session_state.uploaded_files:
             st.session_state.uploaded_files = current_filenames
-            st.session_state.chat_history = []
-            st.session_state.messages = []
-            
+            st.session_state.chat_history   = []
+            st.session_state.messages       = []
+
             file_bytes_list = [f.read() for f in uploaded_files]
-            retriever, n_pages, n_chunks = get_retriever(file_bytes_list, current_filenames)
+            retriever, n_pages, n_chunks = get_retriever(
+                tuple(file_bytes_list),
+                tuple(current_filenames)
+            )
             st.session_state.retriever = retriever
-            
-            st.success(f"✅ Loaded {len(uploaded_files)} file(s)")
+            st.success(f"✅ {len(uploaded_files)} file(s) loaded")
             st.caption(f"{n_pages} pages · {n_chunks} chunks total")
 
     if st.button("🗑️ Clear conversation"):
