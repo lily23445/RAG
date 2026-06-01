@@ -63,7 +63,7 @@ rag_chain = (
 | llm
 | StrOutputParser()
 )
-
+```
 ---
 
 ## Day 2 — Make it real
