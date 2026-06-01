@@ -10,3 +10,4 @@ pypdf
 python-dotenv
 streamlit
 langchain-classic
+torchvision
