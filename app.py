@@ -1,7 +1,10 @@
 import tempfile
 import os
+import json
+import hashlib
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -9,30 +12,78 @@ from day4 import ask, build_sources, embeddings
 
 st.set_page_config(page_title="Chat with PDFs", page_icon="📄", layout="centered")
 
-@st.cache_resource(show_spinner="Building index from PDFs...")
+
+def get_pdf_hash(file_bytes: bytes) -> str:
+    return hashlib.md5(file_bytes).hexdigest()[:12]
+
+@st.cache_resource(show_spinner=False)
 def get_retriever(file_bytes_tuple, filenames_tuple):
-    all_chunks  = []
-    total_pages = 0
+    all_chunks      = []
+    cached_stores   = []
+    total_pages     = 0
 
     for file_bytes, filename in zip(file_bytes_tuple, filenames_tuple):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
-            f.write(file_bytes)
-            tmp_path = f.name
-        try:
-            loader = PyPDFLoader(tmp_path)
-            pages  = loader.load()
-            for page in pages:
-                page.metadata["source_file"] = filename
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            chunks   = splitter.split_documents(pages)
-            all_chunks.extend(chunks)
-            total_pages += len(pages)
-        finally:
-            os.unlink(tmp_path)
+        pdf_hash  = get_pdf_hash(file_bytes)
+        cache_dir = f"pdf_cache/{pdf_hash}"
 
-    vs = FAISS.from_documents(all_chunks, embeddings)
-    return vs.as_retriever(search_kwargs={"k": 4}), total_pages, len(all_chunks)
+        if os.path.exists(cache_dir):
+            st.toast(f"⚡ {filename} loaded from cache")
+            cached_vs = FAISS.load_local(
+                cache_dir, embeddings,
+                allow_dangerous_deserialization=True
+            )
+            cached_stores.append(cached_vs)
+            chunks_path = f"{cache_dir}/chunks.json"
+            if os.path.exists(chunks_path):
+                with open(chunks_path) as f:
+                    raw = json.load(f)
+                total_pages += len(set(
+                    c["metadata"].get("page", 0) for c in raw
+                ))
+                all_chunks.extend([
+                    Document(page_content=c["page_content"], metadata=c["metadata"])
+                    for c in raw
+                ])
+            continue
 
+        with st.spinner(f"Embedding {filename}..."):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
+                f.write(file_bytes)
+                tmp_path = f.name
+            try:
+                loader   = PyPDFLoader(tmp_path)
+                pages    = loader.load()
+                for page in pages:
+                    page.metadata["source_file"] = filename
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=1000, chunk_overlap=200
+                )
+                chunks = splitter.split_documents(pages)
+                all_chunks.extend(chunks)
+                total_pages += len(pages)
+
+                os.makedirs(cache_dir, exist_ok=True)
+                vs = FAISS.from_documents(chunks, embeddings)
+                vs.save_local(cache_dir)
+                cached_stores.append(vs)
+
+                with open(f"{cache_dir}/chunks.json", "w") as f:
+                    json.dump([{
+                        "page_content": c.page_content,
+                        "metadata": c.metadata
+                    } for c in chunks], f)
+            finally:
+                os.unlink(tmp_path)
+
+    # merge all FAISS stores into one
+    if len(cached_stores) == 1:
+        combined = cached_stores[0]
+    else:
+        combined = cached_stores[0]
+        for store in cached_stores[1:]:
+            combined.merge_from(store)
+
+    return combined.as_retriever(search_kwargs={"k": 5}), total_pages, len(all_chunks)
 # ---- session state ----
 if "chat_history"   not in st.session_state: st.session_state.chat_history   = []
 if "messages"       not in st.session_state: st.session_state.messages       = []
