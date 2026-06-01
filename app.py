@@ -143,7 +143,7 @@ if question := st.chat_input("Ask a question about your PDFs..."):
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                answer, docs = ask(
+                answer, docs, base_docs = ask(
                     question,
                     st.session_state.chat_history,
                     st.session_state.retriever
@@ -154,6 +154,42 @@ if question := st.chat_input("Ask a question about your PDFs..."):
                 with st.expander("Sources"):
                     for src in sources:
                         st.caption(src)
+
+            # ---- Retrieval Visualization ----
+            if base_docs or docs:
+                with st.expander("🔍 Retrieval Debug", expanded=False):
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**FAISS top-8** *(before rerank)*")
+                        for i, doc in enumerate(base_docs):
+                            page = doc.metadata.get("page", "?")
+                            file = doc.metadata.get("source_file", "")
+                            snippet = doc.page_content[:80].replace("\n", " ")
+                            st.markdown(f"`#{i+1}` **{file}** · Page {page}")
+                            st.caption(snippet + "...")
+                            st.divider()
+
+                    with col2:
+                        st.markdown("**Cohere top-4** *(after rerank)*")
+                        
+                        # build a lookup of reranked pages to highlight movement
+                        base_pages = [d.metadata.get("page") for d in base_docs]
+                        
+                        for i, doc in enumerate(docs):
+                            page = doc.metadata.get("page", "?")
+                            file = doc.metadata.get("source_file", "")
+                            snippet = doc.page_content[:80].replace("\n", " ")
+                            
+                            # show if rank changed
+                            original_rank = base_pages.index(page) + 1 if page in base_pages else "?"
+                            moved = original_rank != i + 1
+                            rank_label = f"was #{original_rank} → now #{i+1} 🔺" if moved else f"#{i+1}"
+                            
+                            st.markdown(f"`{rank_label}` **{file}** · Page {page}")
+                            st.caption(snippet + "...")
+                            st.divider()
 
         st.session_state.chat_history.append(HumanMessage(content=question))
         st.session_state.chat_history.append(AIMessage(content=answer))

@@ -115,9 +115,10 @@ def ask(question: str, chat_history: list, retriever) -> tuple:
     else:
         standalone = question
 
-    print("Original:", question)
-    print("Standalone:", standalone)
-
+    # Step 1: raw FAISS fetch (k=8)
+    base_docs = retriever.base_retriever.invoke(standalone)
+    
+    # Step 2: rerank
     docs = retriever.invoke(standalone)
     context = format_docs(docs)
 
@@ -127,14 +128,15 @@ def ask(question: str, chat_history: list, retriever) -> tuple:
             "chat_history": chat_history,
             "question": question
         })
-        return answer,docs
+        return answer, docs, base_docs   # ✅ now returns 3 values
 
     except Exception as e:
         if "rate limit" in str(e).lower():
-            answer = "Groq daily token limit reached. Please try again later."
-            return answer,[]  # ✅ FIX HERE
+            return "Groq daily token limit reached. Please try again later.", [], []
         else:
             raise
+
+ 
         
 def build_sources(answer: str, docs: list) -> list:
     if any(phrase in answer.lower() for phrase in [
@@ -202,6 +204,7 @@ if __name__ == "__main__":
 
     vectorstore = build_or_load_vectorstore(PDF_PATHS)
     retriever = get_reranked_retriever(vectorstore)
+    
 
     print("\nReady. Ask questions (type 'quit' to exit, 'clear' to reset memory).\n")
     chat_history = []
