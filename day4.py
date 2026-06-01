@@ -28,10 +28,19 @@ llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 # ---- prompts ----
 reformulate_prompt = ChatPromptTemplate.from_messages([
     ("system",
-     "Rewrite the new question as a fully self-contained search query "
-     "that does NOT rely on the conversation history. "
-     "If already self-contained, return it as-is. "
-     "Return ONLY the rewritten question, nothing else."),
+     "You are given a conversation history and a follow-up question.\n"
+     "Rewrite the follow-up as a fully self-contained search query.\n\n"
+     "Rules:\n"
+     "1. Preserve the specific topic from the conversation history.\n"
+     "2. Replace ALL pronouns (it, its, they, this, that) with the actual topic.\n"
+     "3. If the follow-up is vague (e.g. 'types of', 'tell me more', 'examples'),\n"
+     "   combine it with the last discussed topic to form a complete query.\n"
+     "4. Return ONLY the rewritten query. No explanation.\n\n"
+     "Examples:\n"
+     "History: discussed replication | Follow-up: 'types of' → 'types of replication'\n"
+     "History: discussed mutual exclusion | Follow-up: 'types of' → 'types of mutual exclusion algorithms'\n"
+     "History: discussed Suzuki-Kasami | Follow-up: 'how does it work?' → 'how does the Suzuki-Kasami algorithm work?'\n"
+     "History: discussed process migration | Follow-up: 'advantages' → 'advantages of process migration'"),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{question}")
 ])
@@ -78,6 +87,9 @@ def ask(question: str, chat_history: list, retriever) -> tuple:
     else:
         standalone = question
 
+    print("Original:", question)
+    print("Standalone:", standalone)
+
     docs = retriever.invoke(standalone)
     context = format_docs(docs)
 
@@ -97,7 +109,13 @@ def ask(question: str, chat_history: list, retriever) -> tuple:
             raise
         
 def build_sources(answer: str, docs: list) -> list:
-    if "i don't have enough information" in answer.lower():
+    if any(phrase in answer.lower() for phrase in [
+        "i don't have enough information",
+        "could you clarify",
+        "not specific enough",
+        "please clarify",
+        "did you mean",
+    ]):
         return []
     seen, sources = set(), []
     for doc in docs:
@@ -159,7 +177,7 @@ if __name__ == "__main__":
 
     print("\nReady. Ask questions (type 'quit' to exit, 'clear' to reset memory).\n")
     chat_history = []
-
+    
     while True:
         question = input("You: ").strip()
         if question.lower() in {"quit", "exit", "q"}:
@@ -178,6 +196,7 @@ if __name__ == "__main__":
             sources = []
 
         print(f"\nANSWER: {answer}")
+        
         if sources:
             print("\nSOURCES:")
             for src in sources:
@@ -186,3 +205,4 @@ if __name__ == "__main__":
 
         chat_history.append(HumanMessage(content=question))
         chat_history.append(AIMessage(content=answer))
+
