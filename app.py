@@ -8,7 +8,7 @@ from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from day4 import ask, build_sources, embeddings
+from day4 import ask, build_sources, embeddings,get_reranked_retriever
 
 st.set_page_config(page_title="Chat with PDFs", page_icon="📄", layout="centered")
 
@@ -83,7 +83,8 @@ def get_retriever(file_bytes_tuple, filenames_tuple):
         for store in cached_stores[1:]:
             combined.merge_from(store)
 
-    return combined.as_retriever(search_kwargs={"k": 5}), total_pages, len(all_chunks)
+    return get_reranked_retriever(combined), total_pages, len(all_chunks)
+
 # ---- session state ----
 if "chat_history"   not in st.session_state: st.session_state.chat_history   = []
 if "messages"       not in st.session_state: st.session_state.messages       = []

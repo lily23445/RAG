@@ -2,7 +2,9 @@ import os
 import streamlit as st
 import warnings
 from dotenv import load_dotenv
-
+from langchain_cohere import CohereRerank
+# correct import for LangChain v1:
+from langchain_classic.retrievers import ContextualCompressionRetriever
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -13,8 +15,16 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from groq import RateLimitError
 
+# replace this:
 if "GROQ_API_KEY" in st.secrets:
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+
+# with this:
+try:
+    if "GROQ_API_KEY" in st.secrets:
+        os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+except Exception:
+    pass
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 load_dotenv()
@@ -77,6 +87,24 @@ Context:
 # ---- core functions (importable) ----
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
+
+def get_reranked_retriever(vectorstore):
+    """
+    Fetch wide with FAISS (k=8), rerank precise with Cohere (top_n=4).
+    Cross-encoder reranker scores each chunk against the query directly
+    — more accurate than embedding similarity alone.
+    """
+    base_retriever = vectorstore.as_retriever(
+        search_kwargs={"k": 8}
+    )
+    reranker = CohereRerank(
+        model="rerank-english-v3.0",
+        top_n=4
+    )
+    return ContextualCompressionRetriever(
+        base_compressor=reranker,
+        base_retriever=base_retriever
+    )
 
 def ask(question: str, chat_history: list, retriever) -> tuple:
     if chat_history:
@@ -173,7 +201,7 @@ if __name__ == "__main__":
         return vs
 
     vectorstore = build_or_load_vectorstore(PDF_PATHS)
-    retriever   = vectorstore.as_retriever(search_kwargs={"k": 6})
+    retriever = get_reranked_retriever(vectorstore)
 
     print("\nReady. Ask questions (type 'quit' to exit, 'clear' to reset memory).\n")
     chat_history = []
