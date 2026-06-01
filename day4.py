@@ -64,9 +64,9 @@ question instead of guessing.
 4. If the question is clear but the answer is not present in the context,
 reply exactly:
 "I don't have enough information in the document to answer that."
-
-5. Never use outside knowledge.
-6. Never invent facts.
+5. If the answer is explicitly stated as a number or formula in the context, quote it exactly.
+6. Never use outside knowledge.
+7. Never invent facts.
 
 Context:
 {context}
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     from langchain_community.document_loaders import PyPDFLoader
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-    PDF_PATHS = ["Test.pdf"]  # Add more PDF paths here
+    PDF_PATHS = ["NOTES.pdf"]  # Add more PDF paths here
     INDEX_DIR = "faiss_index"
 
     def build_or_load_vectorstore(pdf_paths):
@@ -173,7 +173,7 @@ if __name__ == "__main__":
         return vs
 
     vectorstore = build_or_load_vectorstore(PDF_PATHS)
-    retriever   = vectorstore.as_retriever(search_kwargs={"k": 4})
+    retriever   = vectorstore.as_retriever(search_kwargs={"k": 6})
 
     print("\nReady. Ask questions (type 'quit' to exit, 'clear' to reset memory).\n")
     chat_history = []
