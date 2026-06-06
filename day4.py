@@ -1,7 +1,10 @@
 import os
+
+from dotenv import load_dotenv
+load_dotenv()
+
 import streamlit as st
 import warnings
-from dotenv import load_dotenv
 from langchain_cohere import CohereRerank
 # correct import for LangChain v1:
 from langchain_classic.retrievers import ContextualCompressionRetriever
@@ -14,20 +17,29 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from groq import RateLimitError
+from langchain_groq import ChatGroq
 
-# replace this:
-if "GROQ_API_KEY" in st.secrets:
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
-# with this:
+
+# LangSmith tracing — set env vars before any LangChain calls
+
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+
 try:
     if "GROQ_API_KEY" in st.secrets:
         os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 except Exception:
     pass
+try:
+    if "LANGCHAIN_API_KEY" in st.secrets:
+        os.environ["LANGCHAIN_API_KEY"]    = st.secrets["LANGCHAIN_API_KEY"]
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"]    = "chat-with-pdf"
+except Exception:
+    pass
 
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-load_dotenv()
 
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -220,7 +232,7 @@ if __name__ == "__main__":
         if not question:
             continue
 
-        answer, docs = ask(question, chat_history, retriever)
+        answer, docs, base_docs = ask(question, chat_history, retriever)
         if docs:   # only show sources if real retrieval happened
             sources = build_sources(answer, docs)
         else:

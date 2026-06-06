@@ -12,3 +12,4 @@ streamlit
 langchain-classic
 langchain-cohere
 torchvision
+langsmith
