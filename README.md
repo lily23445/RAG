@@ -40,7 +40,7 @@ Built as a focused 7-day learning sprint to go from zero to a production-aware, 
 - **Day 3 — Polish** ✅ Conversation memory, query reformulation, Streamlit UI, multi-PDF support, deployed live.
 - **Day 4 — Hardening** ✅ Failure handling, Groq rate limit graceful degradation, query analysis agent replaced with smarter answer prompt clarification, PDF caching.
 - **Day 5 — Evaluation & Reranking** ✅ Evaluated retrieval quality, identified top-k gaps, added Cohere reranking, built retrieval debug UI to visualize the full pipeline.
-- **Day 6 — Polish** README, demo recording, write-up.
+- **Day 6 — Evaluation with LangSmithPolish**
 - **Day 7 — Ship** Final cleanup and submission.
 
 ---
@@ -139,6 +139,61 @@ This makes the entire RAG pipeline visible and verifiable — not a black box.
 
 ---
 
+## Day 6 — Evaluation with LangSmith 
+
+With the pipeline working end-to-end, Day 6 focused on **measuring** it — not eyeballing answers, but systematically evaluating whether the RAG system produced faithful, grounded responses.
+
+**Test document:** Distributed Computing exam notes (TE CSE-AIML, Sem VI, APSIT)
+
+### What was evaluated
+- **Answer faithfulness** — does the answer stay grounded in the retrieved context, or does the LLM hallucinate beyond it?
+
+### How it works
+Questions were run through the full pipeline — reformulation → FAISS retrieval → Cohere reranking → LLM answer. LangSmith captured every run as a **trace**, making the full input/output at each step visible in the dashboard.
+
+An **LLM-as-judge evaluator** then scored each answer for faithfulness: it reads the retrieved context and generated answer together and decides whether the answer is supported — no ground-truth answers needed.
+
+> Pipeline: Question → Reformulation → FAISS (k=8) → Cohere Rerank (top 4) → LLM Answer → LangSmith Trace → Judge Score (1–5)
+
+### Evaluator prompt
+
+```
+Persona: Expert QA evaluator assessing RAG answer quality.
+
+Rubric — a high-quality answer:
+  - Is grounded in the PDF content (every claim traceable to source)
+  - Directly and completely answers the question without padding
+  - Does not hallucinate facts absent from retrieved context
+  - Cites or references the relevant section/page when applicable
+
+Deduct points for:
+  - Hallucination (info not in retrieved context)
+  - Ignoring part of the question
+  - Filler phrases ("Great question!", "Hope this helps")
+  - Vague answers that could apply to any document
+
+Output: Score 1–5 + one-sentence justification
+Note: Score 5 requires both faithfulness AND complete coverage.
+```
+
+### Stack additions
+| Component | Choice |
+|-----------|--------|
+| Tracing | LangSmith (auto via `LANGCHAIN_TRACING_V2=true`) |
+| Evaluator | LangSmith LLM-as-judge (faithfulness, score 1–5) |
+| Test document | DC exam notes PDF (APSIT TE CSE-AIML Sem VI) |
+
+### Setup
+Add to your `.env`:
+```
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_key_here
+LANGCHAIN_PROJECT=askmeque
+```
+Get a free key at [smith.langchain.com](https://smith.langchain.com)
+
+
+
 ## Concepts learned
 
 **Day 1**
@@ -174,7 +229,14 @@ This makes the entire RAG pipeline visible and verifiable — not a black box.
 - Pipeline transparency — making every step of RAG visible and debuggable
 - Evaluation without ground truth — using the debug UI to manually verify retrieval quality
 
+**Day 6**
+- **Tracing** — every LangChain call is auto-logged; see exactly what the retriever fetched and what the LLM saw
+- **LLM-as-judge** — a practical way to evaluate faithfulness without manually writing expected answers
+- **Traceability over accuracy** — evaluation without ground truth is possible when you can verify grounding instead
+- **Where the pipeline struggled** — traces revealed cases where reranking surfaced the right chunk but the LLM over-generalised beyond it
+
 ---
+
 
 ## Setup
 
@@ -209,8 +271,5 @@ streamlit run app.py
 
 ---
 
-## Status
-
-🚧 Work in progress — building one day at a time. Follow the commit history to watch it come together.
 
 
