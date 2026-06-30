@@ -1,12 +1,11 @@
 import os
+import warnings
 
 from dotenv import load_dotenv
 load_dotenv()
 
 import streamlit as st
-import warnings
 from langchain_cohere import CohereRerank
-# correct import for LangChain v1:
 from langchain_classic.retrievers import ContextualCompressionRetriever
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -15,18 +14,23 @@ from langchain_groq import ChatGroq
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
-from groq import RateLimitError
-from langchain_groq import ChatGroq
-
-
-
-# LangSmith tracing — set env vars before any LangChain calls
-
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+# ---- config ----
+EMBED_MODEL    = "sentence-transformers/all-MiniLM-L6-v2"
+LLM_MODEL      = "llama-3.3-70b-versatile"
+RETRIEVAL_K    = 8
+RERANK_TOP_N   = 4
+CHUNK_SIZE     = 1000
+CHUNK_OVERLAP  = 200
+SOURCE_SNIPPET = 100
 
+NO_INFO_RESPONSE = "I don't have enough information in the document to answer that."
+
+# ---- secrets ----
 try:
     if "GROQ_API_KEY" in st.secrets:
         os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
@@ -40,12 +44,9 @@ try:
 except Exception:
     pass
 
-
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+# ---- models ----
+embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+llm        = ChatGroq(model=LLM_MODEL, temperature=0)
 
 # ---- prompts ----
 reformulate_prompt = ChatPromptTemplate.from_messages([
@@ -69,7 +70,7 @@ reformulate_prompt = ChatPromptTemplate.from_messages([
 
 answer_prompt = ChatPromptTemplate.from_messages([
     ("system",
-     """You are a document question-answering assistant.
+     f"""You are a document question-answering assistant.
 
 Rules:
 
@@ -85,40 +86,34 @@ question instead of guessing.
 
 4. If the question is clear but the answer is not present in the context,
 reply exactly:
-"I don't have enough information in the document to answer that."
+"{NO_INFO_RESPONSE}"
 5. If the answer is explicitly stated as a number or formula in the context, quote it exactly.
 6. Never use outside knowledge.
 7. Never invent facts.
 
 Context:
-{context}
+{{context}}
 """),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{question}")
 ])
-# ---- core functions (importable) ----
-def format_docs(docs):
+
+# ---- core functions ----
+def format_docs(docs: list[Document]) -> str:
     return "\n\n".join(doc.page_content for doc in docs)
 
+
 def get_reranked_retriever(vectorstore):
-    """
-    Fetch wide with FAISS (k=8), rerank precise with Cohere (top_n=4).
-    Cross-encoder reranker scores each chunk against the query directly
-    — more accurate than embedding similarity alone.
-    """
-    base_retriever = vectorstore.as_retriever(
-        search_kwargs={"k": 8}
-    )
-    reranker = CohereRerank(
-        model="rerank-english-v3.0",
-        top_n=4
-    )
+    """FAISS fetches RETRIEVAL_K candidates; Cohere cross-encoder reranks to RERANK_TOP_N."""
+    base_retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVAL_K})
+    reranker = CohereRerank(model="rerank-english-v3.0", top_n=RERANK_TOP_N)
     return ContextualCompressionRetriever(
         base_compressor=reranker,
         base_retriever=base_retriever
     )
 
-def ask(question: str, chat_history: list, retriever) -> tuple:
+
+def ask(question: str, chat_history: list, retriever) -> tuple[str, list[Document], list[Document]]:
     if chat_history:
         standalone = (reformulate_prompt | llm | StrOutputParser()).invoke({
             "chat_history": chat_history,
@@ -127,11 +122,15 @@ def ask(question: str, chat_history: list, retriever) -> tuple:
     else:
         standalone = question
 
-    # Step 1: raw FAISS fetch (k=8)
+    # Retrieve candidate chunks via FAISS similarity search
     base_docs = retriever.base_retriever.invoke(standalone)
-    
-    # Step 2: rerank
+
+    # Rerank with Cohere cross-encoder for precision
     docs = retriever.invoke(standalone)
+
+    if not docs:
+        return NO_INFO_RESPONSE, [], []
+
     context = format_docs(docs)
 
     try:
@@ -140,87 +139,109 @@ def ask(question: str, chat_history: list, retriever) -> tuple:
             "chat_history": chat_history,
             "question": question
         })
-        return answer, docs, base_docs   # ✅ now returns 3 values
+        return answer, docs, base_docs
 
     except Exception as e:
         if "rate limit" in str(e).lower():
             return "Groq daily token limit reached. Please try again later.", [], []
-        else:
-            raise
+        raise
 
- 
-        
-def build_sources(answer: str, docs: list) -> list:
+
+def extract_table_chunks(pdf_path: str, filename: str) -> list[Document]:
+    """Extract tables from a PDF with pdfplumber and return them as Document chunks."""
+    try:
+        import pdfplumber
+    except ImportError:
+        return []
+
+    chunks = []
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                tables = page.extract_tables()
+                for table in tables:
+                    if not table:
+                        continue
+                    rows = [
+                        " | ".join(cell.strip() if cell else "" for cell in row)
+                        for row in table
+                    ]
+                    table_text = "\n".join(rows)
+                    if len(table_text.strip()) < 20:
+                        continue
+                    chunks.append(Document(
+                        page_content=f"[TABLE]\n{table_text}",
+                        metadata={"page": page_num + 1, "source_file": filename, "type": "table"}
+                    ))
+    except Exception as e:
+        print(f"Table extraction failed for {filename}: {e}")
+
+    return chunks
+
+
+def build_sources(answer: str, docs: list[Document]) -> list[str]:
     if any(phrase in answer.lower() for phrase in [
-        "i don't have enough information",
+        NO_INFO_RESPONSE.lower(),
         "could you clarify",
         "not specific enough",
         "please clarify",
         "did you mean",
     ]):
         return []
+
     seen, sources = set(), []
     for doc in docs:
         page = doc.metadata.get("page", "?")
         file = doc.metadata.get("source_file", "Unknown")
-
-        key = (file, page)
-
+        key  = (file, page)
         if key not in seen:
             seen.add(key)
-
-            snippet = doc.page_content[:100].replace("\n", " ")
-
-            sources.append(
-                f"{file} | Page {page}: {snippet}..."
-            )
+            snippet = doc.page_content[:SOURCE_SNIPPET].replace("\n", " ")
+            sources.append(f"{file} | Page {page}: {snippet}...")
 
     return sources
 
+
 # ---- terminal loop (local only) ----
 if __name__ == "__main__":
-    from langchain_community.document_loaders import PyPDFLoader
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-    PDF_PATHS = ["NOTES.pdf"]  # Add more PDF paths here
+    PDF_PATHS = ["NOTES.pdf"]
     INDEX_DIR = "faiss_index"
 
     def build_or_load_vectorstore(pdf_paths):
         if os.path.exists(INDEX_DIR):
             return FAISS.load_local(INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
-        
-        # Process multiple PDFs
+
         all_chunks = []
         for pdf_path in pdf_paths:
             if not os.path.exists(pdf_path):
                 print(f"Warning: {pdf_path} not found, skipping...")
                 continue
-            
+
             loader = PyPDFLoader(pdf_path)
-            pages = loader.load()
-            
-            # Add source_file metadata to each document
+            pages  = loader.load()
             for page in pages:
                 page.metadata["source_file"] = os.path.basename(pdf_path)
-            
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
+            )
             chunks = splitter.split_documents(pages)
+            chunks += extract_table_chunks(pdf_path, os.path.basename(pdf_path))
             all_chunks.extend(chunks)
-        
+
         if not all_chunks:
             raise ValueError("No valid PDFs found!")
-        
-        vs = FAISS.from_documents(all_chunks, embeddings)
-        vs.save_local(INDEX_DIR)
-        return vs
+
+        vectorstore = FAISS.from_documents(all_chunks, embeddings)
+        vectorstore.save_local(INDEX_DIR)
+        return vectorstore
 
     vectorstore = build_or_load_vectorstore(PDF_PATHS)
-    retriever = get_reranked_retriever(vectorstore)
-    
+    retriever   = get_reranked_retriever(vectorstore)
 
     print("\nReady. Ask questions (type 'quit' to exit, 'clear' to reset memory).\n")
     chat_history = []
-    
+
     while True:
         question = input("You: ").strip()
         if question.lower() in {"quit", "exit", "q"}:
@@ -233,13 +254,9 @@ if __name__ == "__main__":
             continue
 
         answer, docs, base_docs = ask(question, chat_history, retriever)
-        if docs:   # only show sources if real retrieval happened
-            sources = build_sources(answer, docs)
-        else:
-            sources = []
+        sources = build_sources(answer, docs) if docs else []
 
         print(f"\nANSWER: {answer}")
-        
         if sources:
             print("\nSOURCES:")
             for src in sources:
@@ -248,4 +265,3 @@ if __name__ == "__main__":
 
         chat_history.append(HumanMessage(content=question))
         chat_history.append(AIMessage(content=answer))
-

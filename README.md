@@ -28,7 +28,7 @@ Built as a focused 7-day learning sprint to go from zero to a production-aware, 
 | Embeddings | sentence-transformers MiniLM (local) | Free, runs on CPU, no API needed |
 | Vector store | FAISS | Fast in-memory similarity search, zero setup |
 | Reranker | Cohere Rerank v3 | Cross-encoder reranking for more accurate retrieval |
-| PDF loading | PyPDFLoader | Simple page-by-page text extraction |
+| PDF loading | PyPDFLoader + pdfplumber | Text extraction + structured table extraction |
 | UI | Streamlit | Fast, clean web interface |
 
 ---
@@ -40,7 +40,7 @@ Built as a focused 7-day learning sprint to go from zero to a production-aware, 
 - **Day 3 — Polish** ✅ Conversation memory, query reformulation, Streamlit UI, multi-PDF support, deployed live.
 - **Day 4 — Hardening** ✅ Failure handling, Groq rate limit graceful degradation, query analysis agent replaced with smarter answer prompt clarification, PDF caching.
 - **Day 5 — Evaluation & Reranking** ✅ Evaluated retrieval quality, identified top-k gaps, added Cohere reranking, built retrieval debug UI to visualize the full pipeline.
-- **Day 6 — Evaluation with LangSmithPolish**
+- **Day 6 — LangSmith evaluation, table extraction & code hardening** ✅ LLM-as-judge faithfulness scoring, pdfplumber table extraction, constants, empty-retrieval short-circuit, silent exception fixes.
 - **Day 7 — Ship** Final cleanup and submission.
 
 ---
@@ -139,16 +139,13 @@ This makes the entire RAG pipeline visible and verifiable — not a black box.
 
 ---
 
-## Day 6 — Evaluation with LangSmith 
+## Day 6 — LangSmith evaluation, table extraction & code hardening
 
+### Evaluation with LangSmith
 With the pipeline working end-to-end, Day 6 focused on **measuring** it — not eyeballing answers, but systematically evaluating whether the RAG system produced faithful, grounded responses.
 
 **Test document:** Distributed Computing exam notes (TE CSE-AIML, Sem VI, APSIT)
 
-### What was evaluated
-- **Answer faithfulness** — does the answer stay grounded in the retrieved context, or does the LLM hallucinate beyond it?
-
-### How it works
 Questions were run through the full pipeline — reformulation → FAISS retrieval → Cohere reranking → LLM answer. LangSmith captured every run as a **trace**, making the full input/output at each step visible in the dashboard.
 
 An **LLM-as-judge evaluator** then scored each answer for faithfulness: it reads the retrieved context and generated answer together and decides whether the answer is supported — no ground-truth answers needed.
@@ -176,14 +173,12 @@ Output: Score 1–5 + one-sentence justification
 Note: Score 5 requires both faithfulness AND complete coverage.
 ```
 
-### Stack additions
 | Component | Choice |
 |-----------|--------|
 | Tracing | LangSmith (auto via `LANGCHAIN_TRACING_V2=true`) |
 | Evaluator | LangSmith LLM-as-judge (faithfulness, score 1–5) |
 | Test document | DC exam notes PDF (APSIT TE CSE-AIML Sem VI) |
 
-### Setup
 Add to your `.env`:
 ```
 LANGCHAIN_TRACING_V2=true
@@ -192,7 +187,19 @@ LANGCHAIN_PROJECT=askmeque
 ```
 Get a free key at [smith.langchain.com](https://smith.langchain.com)
 
+### Table extraction
+`PyPDFLoader` dumps PDF text as a flat stream — tables come out as garbled rows with no structure. Added `pdfplumber` to run alongside the existing loader: it detects tables per page, converts each to a pipe-delimited text block tagged `[TABLE]`, and adds them as extra chunks into the same FAISS index.
 
+This means questions about data in tables (comparisons, numbers, structured lists) now retrieve the right chunks instead of getting nothing or garbage.
+
+### Code hardening
+- **Constants** — `CHUNK_SIZE`, `CHUNK_OVERLAP`, `RETRIEVAL_K`, `RERANK_TOP_N`, `LLM_MODEL`, `NO_INFO_RESPONSE` all defined once and referenced everywhere. Change a number in one place, the whole pipeline updates.
+- **Single source of truth** — `app.py` imports constants from `day4.py` instead of maintaining its own copies. The debug panel labels read `RETRIEVAL_K` and `RERANK_TOP_N` directly.
+- **Empty retrieval short-circuit** — if FAISS + Cohere return no docs, the LLM call is skipped entirely. Saves tokens, avoids hallucination on empty context.
+- **No silent failures** — `extract_table_chunks` now prints the error instead of swallowing it with bare `except: pass`.
+- **Page numbering** — table chunk metadata stores `page_num + 1` so sources display "Page 1" not "Page 0".
+
+---
 
 ## Concepts learned
 
@@ -230,10 +237,13 @@ Get a free key at [smith.langchain.com](https://smith.langchain.com)
 - Evaluation without ground truth — using the debug UI to manually verify retrieval quality
 
 **Day 6**
-- **Tracing** — every LangChain call is auto-logged; see exactly what the retriever fetched and what the LLM saw
-- **LLM-as-judge** — a practical way to evaluate faithfulness without manually writing expected answers
-- **Traceability over accuracy** — evaluation without ground truth is possible when you can verify grounding instead
-- **Where the pipeline struggled** — traces revealed cases where reranking surfaced the right chunk but the LLM over-generalised beyond it
+- Tracing — every LangChain call is auto-logged; see exactly what the retriever fetched and what the LLM saw
+- LLM-as-judge — a practical way to evaluate faithfulness without manually writing expected answers
+- Traceability over accuracy — evaluation without ground truth is possible when you can verify grounding instead
+- Table extraction — why flat text loaders lose structure, and how pdfplumber recovers it
+- Single source of truth — why duplicating constants across files creates drift bugs
+- Short-circuit patterns — skipping expensive LLM calls when retrieval returns nothing
+- Silent exceptions are worse than loud ones — bare `except: pass` hides real bugs
 
 ---
 
@@ -247,7 +257,7 @@ source .venv/bin/activate     # macOS / Linux
 
 pip install langchain langchain-core langchain-community langchain-text-splitters \
             langchain-groq langchain-huggingface langchain-cohere \
-            sentence-transformers faiss-cpu pypdf python-dotenv streamlit
+            sentence-transformers faiss-cpu pypdf pdfplumber python-dotenv streamlit
 ```
 
 Create a `.env` file:

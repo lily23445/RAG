@@ -8,15 +8,14 @@ from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from day4 import ask, build_sources, embeddings,get_reranked_retriever
+from day4 import ask, build_sources, embeddings, get_reranked_retriever, extract_table_chunks, CHUNK_SIZE, CHUNK_OVERLAP, RETRIEVAL_K, RERANK_TOP_N
 
 st.set_page_config(page_title="Chat with PDFs", page_icon="📄", layout="centered")
 
-
-def get_pdf_hash(file_bytes: bytes) -> str:
+def get_pdf_hash(file_bytes: bytes) -> str: # create a short hash of the PDF content for caching
     return hashlib.md5(file_bytes).hexdigest()[:12]
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False) # cache the retriever for each unique combination of PDFs
 def get_retriever(file_bytes_tuple, filenames_tuple):
     all_chunks      = []
     cached_stores   = []
@@ -30,7 +29,7 @@ def get_retriever(file_bytes_tuple, filenames_tuple):
             st.toast(f"⚡ {filename} loaded from cache")
             cached_vs = FAISS.load_local(
                 cache_dir, embeddings,
-                allow_dangerous_deserialization=True
+                allow_dangerous_deserialization=True #
             )
             cached_stores.append(cached_vs)
             chunks_path = f"{cache_dir}/chunks.json"
@@ -56,9 +55,10 @@ def get_retriever(file_bytes_tuple, filenames_tuple):
                 for page in pages:
                     page.metadata["source_file"] = filename
                 splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=1000, chunk_overlap=200
+                    chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
                 )
                 chunks = splitter.split_documents(pages)
+                chunks += extract_table_chunks(tmp_path, filename)
                 all_chunks.extend(chunks)
                 total_pages += len(pages)
 
@@ -162,7 +162,7 @@ if question := st.chat_input("Ask a question about your PDFs..."):
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.markdown("**FAISS top-8** *(before rerank)*")
+                        st.markdown(f"**FAISS top-{RETRIEVAL_K}** *(before rerank)*")
                         for i, doc in enumerate(base_docs):
                             page = doc.metadata.get("page", "?")
                             file = doc.metadata.get("source_file", "")
@@ -172,7 +172,7 @@ if question := st.chat_input("Ask a question about your PDFs..."):
                             st.divider()
 
                     with col2:
-                        st.markdown("**Cohere top-4** *(after rerank)*")
+                        st.markdown(f"**Cohere top-{RERANK_TOP_N}** *(after rerank)*")
                         
                         # build a lookup of reranked pages to highlight movement
                         base_pages = [d.metadata.get("page") for d in base_docs]
