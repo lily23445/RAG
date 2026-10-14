@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # ---- config ----
 EMBED_MODEL    = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL      = "llama-3.3-70b-versatile"
+LLM_MODEL      = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was decommissioned by Groq on 2026-08-16
 RETRIEVAL_K    = 8
 RERANK_TOP_N   = 4
 CHUNK_SIZE     = 1000

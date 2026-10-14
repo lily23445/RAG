@@ -22,7 +22,7 @@ embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
 
 # ---- prompts ----
 reformulate_prompt = ChatPromptTemplate.from_messages([

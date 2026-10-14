@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnablePassthrough
 load_dotenv()
 
 #load
-loader=PyPDFLoader('test.pdf')
+loader=PyPDFLoader('Test.pdf')
 pages=loader.load()
 print(f"loaded : {len(pages)}  PAGES")
 
@@ -37,7 +37,7 @@ prompt = ChatPromptTemplate.from_messages([
 ])
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     temperature=0
 )
 
